@@ -1,5 +1,6 @@
 package com.example.justplaytvideoplayer
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
@@ -14,78 +15,48 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.example.justplaytvideoplayer.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var player: ExoPlayer
-    private lateinit var playerView: PlayerView
+    private lateinit var binding: ActivityMainBinding  // Correct binding for activity_main.xml
 
-    private val isPlaying: Boolean
-        get() = this::player.isInitialized && player.isPlaying
-
-    @OptIn(UnstableApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContentView(R.layout.activity_main)
 
-        playerView = findViewById(R.id.playerView)
+        // ✅ Initialize the binding first
+        binding = ActivityMainBinding.inflate(layoutInflater)
 
-        player = ExoPlayer.Builder(this).build()
-        playerView.player = player
+        // ✅ Then set the root view
+        setContentView(binding.root)
 
-        // Define subtitles
-        val subtitle = MediaItem.SubtitleConfiguration.Builder(
-            Uri.parse("https://example.com/subtitle.srt")
-        )
-            .setMimeType(MimeTypes.APPLICATION_SUBRIP)
-            .setLanguage("en")
-            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-            .build()
-
-        // Define media item with subtitle
-        val mediaItem = MediaItem.Builder()
-            .setUri("https://youtu.be/3FByxYBcQA4") // 🔁 Use a valid .mp4 URL, not YouTube!
-            .setSubtitleConfigurations(listOf(subtitle))
-            .build()
-
-        // Set and prepare media
-        player.setMediaItem(mediaItem)
-        player.prepare()
-        player.play()
-
-        // Log player status
-        if (isPlaying) {
-            Log.d("PlayerStatus", "Video is playing")
-        } else {
-            Log.d("PlayerStatus", "Video is paused or not initialized")
+        // ✅ Now it's safe to access views using binding
+        fun goToPlayerPage(url: String) {
+            val intent = Intent(this, MediaPlayerActivity::class.java)
+            intent.putExtra("url", url)
+            startActivity(intent)
         }
 
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
+        binding.btn1.setOnClickListener {
+            val url = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+            goToPlayerPage(url)
+        }
+
+        binding.btn2.setOnClickListener {
+            val url = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"
+            goToPlayerPage(url)
+        }
+
+        binding.btn3.setOnClickListener {
+            val url = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+            goToPlayerPage(url)
+        }
+
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
-        }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        if (this::player.isInitialized) {
-            player.pause()
-        }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        if (this::player.isInitialized) {
-            player.play()
-        }
-    }
-
-    override fun onStop() {
-        super.onStop()
-        if (this::player.isInitialized) {
-            player.release()
         }
     }
 }

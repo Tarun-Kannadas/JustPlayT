@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.backend.wasm.ir2wasm.bind
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -33,6 +35,9 @@ android {
     kotlinOptions {
         jvmTarget = "11"
     }
+    buildFeatures{
+        viewBinding = true
+    }
 }
 
 dependencies {
@@ -46,10 +51,11 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     // Media3 (ExoPlayer & UI)
-    implementation("androidx.media3:media3-exoplayer:1.2.1")
-    implementation("androidx.media3:media3-ui:1.2.1")
-
+    implementation(libs.androidx.media3.exoplayer.v171)
+    implementation(libs.androidx.media3.exoplayer.dash)
+    implementation(libs.androidx.media3.ui.v171)
+    implementation(libs.androidx.media3.ui.compose)
     // Optional - if you use SmoothStreaming
-    implementation("androidx.media3:media3-exoplayer-smoothstreaming:1.2.1")
+    implementation(libs.androidx.media3.exoplayer.smoothstreaming)
 
 }
