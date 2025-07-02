@@ -57,5 +57,4 @@ dependencies {
     implementation(libs.androidx.media3.ui.compose)
     // Optional - if you use SmoothStreaming
     implementation(libs.androidx.media3.exoplayer.smoothstreaming)
-
 }
