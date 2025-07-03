@@ -197,7 +197,6 @@ class MediaPlayerActivity : AppCompatActivity() {
                         changeScreenBrightness(-0.05f)
                     }
                 }
-
                 return true
             }
         })
@@ -220,12 +219,13 @@ class MediaPlayerActivity : AppCompatActivity() {
     }
 
     // Brightness Adjustment function
-    private fun changeScreenBrightness(delta: Float) {
-        if (!Settings.System.canWrite(this)) {
+    private fun changeScreenBrightness(delta: Float)
+    {
+        if (!Settings.System.canWrite(this))
+        {
             Toast.makeText(this, "Permission to change brightness denied", Toast.LENGTH_SHORT).show()
             return
         }
-
         val currentBrightness = Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, 125)
         val newBrightness = (currentBrightness + (delta * 255)).toInt().coerceIn(10, 255)
 
