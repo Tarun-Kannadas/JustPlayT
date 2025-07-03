@@ -3,6 +3,7 @@ package com.example.justplaytvideoplayer
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.OptIn
@@ -32,25 +33,26 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         // ✅ Now it's safe to access views using binding
-        fun goToPlayerPage(url: String) {
+        fun goToPlayerPage(url: String, title:String) {
             val intent = Intent(this, MediaPlayerActivity::class.java)
             intent.putExtra("url", url)
+            intent.putExtra("title",title)
             startActivity(intent)
         }
 
         binding.btn1.setOnClickListener {
             val url = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-            goToPlayerPage(url)
+            goToPlayerPage(url,"Big Buck Bunny")
         }
 
         binding.btn2.setOnClickListener {
             val url = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"
-            goToPlayerPage(url)
+            goToPlayerPage(url, "Elephant's Dream")
         }
 
         binding.btn3.setOnClickListener {
             val url = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
-            goToPlayerPage(url)
+            goToPlayerPage(url, "For Bigger Blazes")
         }
 
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
