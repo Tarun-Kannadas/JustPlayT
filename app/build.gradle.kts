@@ -57,4 +57,5 @@ dependencies {
     implementation(libs.androidx.media3.ui.compose)
     // Optional - if you use SmoothStreaming
     implementation(libs.androidx.media3.exoplayer.smoothstreaming)
+    implementation("androidx.cardview:cardview:1.0.0")
 }

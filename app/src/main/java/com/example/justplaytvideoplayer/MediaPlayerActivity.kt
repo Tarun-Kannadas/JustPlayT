@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Bundle
@@ -15,6 +16,7 @@ import android.widget.*
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.MediaItem
@@ -54,23 +56,26 @@ class MediaPlayerActivity : AppCompatActivity() {
             startActivity(intent)
         }
 
-        val url = intent.getStringExtra("url")
-        if (url.isNullOrEmpty()) {
-            Toast.makeText(this, "Invalid video URL", Toast.LENGTH_SHORT).show()
+        // Assigning the media items as a list
+        val uriList = intent.getStringArrayListExtra("videoUris") ?: arrayListOf()
+        val currentIndex = intent.getIntExtra("currentIndex", 0)
+
+        if (uriList.isEmpty()) {
+            Toast.makeText(this, "No videos found", Toast.LENGTH_SHORT).show()
             finish()
             return
         }
 
         // Getting the title
-        val title = intent.getStringExtra("title") ?: "Untitled"
-        binding.playerView.findViewById<TextView>(R.id.titlecard)?.text = title
+        val currentUri = Uri.parse(uriList[currentIndex])
+        binding.playerView.findViewById<TextView>(R.id.titlecard)?.text = currentUri.lastPathSegment ?: "Untitled"
 
+        // Setuping the player
         player = ExoPlayer.Builder(this).build()
         binding.playerView.player = player
 
-        // Assigning the media item
-        val mediaItem = MediaItem.fromUri(url)
-        player.setMediaItem(mediaItem)
+        val mediaItems = uriList.map { uri -> MediaItem.fromUri(Uri.parse(uri)) }
+        player.setMediaItems(mediaItems, currentIndex, 0L)
         player.prepare()
         player.play()
 
@@ -111,22 +116,35 @@ class MediaPlayerActivity : AppCompatActivity() {
         rewindButton.setOnClickListener {
             val newPosition = (player.currentPosition - 10000).coerceAtLeast(0)
             player.seekTo(newPosition)
+            Toast.makeText(applicationContext, "Rewinded 10 secs", Toast.LENGTH_SHORT).show()
         }
 
         // Forward logic
         forwardButton.setOnClickListener {
             val newPosition = (player.currentPosition + 10000).coerceAtMost(player.duration)
             player.seekTo(newPosition)
+            Toast.makeText(applicationContext, "Forwarded 10 secs", Toast.LENGTH_SHORT).show()
         }
 
         // Prev logic
         prevButton.setOnClickListener {
-            player.seekTo(0)
+            if (player.hasPreviousMediaItem()) {
+                player.seekToPrevious()
+            } else {
+                player.seekTo(0) // Restart current
+
+            }
         }
 
         // Next logic
         nextButton.setOnClickListener {
-            player.seekTo(player.duration)
+            if (player.hasNextMediaItem()) {
+                player.seekToNext()
+            }
+            else
+            {
+                Toast.makeText(this, "No next video", Toast.LENGTH_SHORT).show()
+            }
         }
 
         // Fullscreen Logic
@@ -157,18 +175,36 @@ class MediaPlayerActivity : AppCompatActivity() {
                 return true
             }
 
+            // Single Tap Logics for gestures
             @OptIn(UnstableApi::class)
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 binding.playerView.showController()
-                if (player.isPlaying) {
-                    player.pause()
-                    playPauseButton.setImageResource(R.drawable.ic_play)
-                } else {
-                    player.play()
-                    playPauseButton.setImageResource(R.drawable.ic_play)
+
+                // Get the touch location
+                val x = e.rawX.toInt()
+                val y = e.rawY.toInt()
+
+                // Check if the touch was on a control button (like play/pause)
+                val playPauseRect = IntArray(2).apply { playPauseButton.getLocationOnScreen(this) }
+                val px = playPauseRect[0]
+                val py = playPauseRect[1]
+                val pw = playPauseButton.width
+                val ph = playPauseButton.height
+
+                val tappedPlayPause = (x in px..(px + pw) && y in py..(py + ph))
+
+                if (!tappedPlayPause) {
+                    if (player.isPlaying) {
+                        player.pause()
+                        playPauseButton.setImageResource(R.drawable.ic_play)
+                    } else {
+                        player.play()
+                        playPauseButton.setImageResource(R.drawable.ic_play)
+                    }
                 }
                 return true
             }
+
 
             // Scroll Volume & Brightness Logic
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
@@ -210,6 +246,52 @@ class MediaPlayerActivity : AppCompatActivity() {
 
         seekBar.max = 1000
         updateSeekBar()
+
+        player.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_ENDED && player.hasNextMediaItem()) {
+                    player.seekToNext()
+                }
+            }
+        })
+
+        // 3 Dot Menu Mechanism
+        val menuBtn = findViewById<ImageButton>(R.id.btn_menu)
+
+        menuBtn.setOnClickListener {
+            val popup = PopupMenu(this, it)
+            popup.menuInflater.inflate(R.menu.player_menu, popup.menu)
+
+            popup.setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    R.id.action_dark_mode -> {
+                        toggleDarkMode()
+                        true
+                    }
+                    R.id.action_subtitles -> {
+                        // TODO: Show subtitle options
+                        true
+                    }
+                    R.id.action_audio_tracks -> {
+                        // TODO: Show audio track options
+                        true
+                    }
+                    R.id.action_playlist -> {
+                        player.pause()
+                        player.release()
+                        // Finish the activity and return
+                        finish()
+                        true
+                    }
+                    R.id.action_cast -> {
+                        // TODO: Start cast
+                        true
+                    }
+                    else -> false
+                }
+            }
+            popup.show()
+        }
 
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -267,6 +349,13 @@ class MediaPlayerActivity : AppCompatActivity() {
         val minutes = TimeUnit.MILLISECONDS.toMinutes(milliseconds)
         val seconds = TimeUnit.MILLISECONDS.toSeconds(milliseconds) % 60
         return String.format("%02d:%02d", minutes, seconds)
+    }
+
+    private fun toggleDarkMode() {
+        val isDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        AppCompatDelegate.setDefaultNightMode(
+            if (isDark) AppCompatDelegate.MODE_NIGHT_NO else AppCompatDelegate.MODE_NIGHT_YES
+        )
     }
 
     override fun onStart() {

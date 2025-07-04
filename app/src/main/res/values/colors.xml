@@ -5,4 +5,7 @@
     <color name="purple_500">#9C27B0</color>
     <color name="purple_700">#7B1FA2</color>
     <color name="teal_200">#80CBC4</color>
+    <!-- res/values/colors.xml -->
+    <color name="background_light">#FFFFFF</color>
+    <color name="text_light">#000000</color>
 </resources>
