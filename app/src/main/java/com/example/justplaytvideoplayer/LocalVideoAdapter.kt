@@ -7,10 +7,11 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.example.justplaytvideoplayer.databinding.ItemVideoBinding
 
-class VideoAdapter(
+class LocalVideoAdapter(
     private val context: Context,
-    private val videos: List<Video>
-) : RecyclerView.Adapter<VideoAdapter.VideoViewHolder>() {
+    private val videos: List<LocalVideo>
+
+) : RecyclerView.Adapter<LocalVideoAdapter.VideoViewHolder>() {
 
     inner class VideoViewHolder(val binding: ItemVideoBinding) : RecyclerView.ViewHolder(binding.root)
 
@@ -23,12 +24,13 @@ class VideoAdapter(
         val video = videos[position]
         holder.binding.videoTitle.text = video.title
 
+
         holder.binding.root.setOnClickListener {
-            val uriList = videos.mapNotNull { it.sources.firstOrNull() }
+            val uriList = videos.map { it.uri.toString() }
             val intent = Intent(context, MediaPlayerActivity::class.java)
-            intent.putExtra("isNetwork", true)
+            intent.putExtra("isNetwork", false)
+            intent.putStringArrayListExtra("videoUris", ArrayList(uriList))
             intent.putExtra("currentIndex", position)
-            intent.putExtra("networkVideos", ArrayList(videos)) // Make Video implement Serializable
             context.startActivity(intent)
         }
     }

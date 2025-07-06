@@ -1,39 +1,51 @@
 package com.example.justplaytvideoplayer
 
 import android.content.ContentUris
-import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
-import android.provider.Settings
-import android.util.Log
+import android.widget.ImageButton
 import androidx.activity.enableEdgeToEdge
-import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
+import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.justplaytvideoplayer.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityMainBinding  // Correct binding for activity_main.xml
+    private lateinit var binding: ActivityMainBinding
 
-    private fun loadVideos() {
-        val videoList = mutableListOf<Pair<String, Uri>>() // Stores (Title, Uri)
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        loadLocalVideos()
+
+        val backButton: ImageButton = findViewById(R.id.backbtn)
+        backButton.setOnClickListener {
+            finish()
+        }
+
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
+            insets
+        }
+    }
+
+    private fun loadLocalVideos() {
+        val videoList = mutableListOf<LocalVideo>() // ✅ Now using LocalVideo model
 
         val projection = arrayOf(
             MediaStore.Video.Media.TITLE,
             MediaStore.Video.Media._ID
         )
 
-        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val collection: Uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
         } else {
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI
@@ -53,30 +65,21 @@ class MainActivity : AppCompatActivity() {
                 val title = cursor.getString(titleIndex)
                 val id = cursor.getLong(idIndex)
                 val contentUri = ContentUris.withAppendedId(collection, id)
-                videoList.add(Pair(title, contentUri))
+
+                videoList.add(
+                    LocalVideo(
+                        title = title,
+                        uri = contentUri
+                    )
+                )
             }
         }
 
         if (videoList.isNotEmpty()) {
             binding.videoRecyclerView.apply {
-                layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this@MainActivity)
-                adapter = VideoAdapter(this@MainActivity, videoList)
+                layoutManager = LinearLayoutManager(this@MainActivity)
+                adapter = LocalVideoAdapter(this@MainActivity, videoList) // ✅ LocalVideoAdapter used
             }
-        }
-    }
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        binding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-
-        loadVideos() // Load the video list here
-
-        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
-            insets
         }
     }
 }

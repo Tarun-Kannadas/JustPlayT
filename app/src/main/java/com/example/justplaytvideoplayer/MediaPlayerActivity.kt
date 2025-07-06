@@ -12,11 +12,13 @@ import android.os.Handler
 import android.provider.Settings
 import android.view.GestureDetector
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.widget.*
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.constraintlayout.widget.ConstraintSet.Motion
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.MediaItem
@@ -38,7 +40,12 @@ class MediaPlayerActivity : AppCompatActivity() {
     private lateinit var seekBar: SeekBar
     private lateinit var currentTimeText: TextView
     private lateinit var totalTimeText: TextView
+    private lateinit var scaleGestureDetector: ScaleGestureDetector
+    private var scaleFactor = 1.0f
+    private var gestureDirection: String? = null
+    private var isZooming = false
 
+    @OptIn(UnstableApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -50,6 +57,11 @@ class MediaPlayerActivity : AppCompatActivity() {
         binding = ActivityMediaPlayerBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Setuping the player
+        player = ExoPlayer.Builder(this).build()
+        binding.playerView.player = player
+        binding.playerView.setControllerShowTimeoutMs(1000) // hides after 1 second
+
         // ✅ Request permission to modify brightness
         if (!Settings.System.canWrite(this)) {
             val intent = Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName"))
@@ -57,25 +69,40 @@ class MediaPlayerActivity : AppCompatActivity() {
         }
 
         // Assigning the media items as a list
-        val uriList = intent.getStringArrayListExtra("videoUris") ?: arrayListOf()
-        val currentIndex = intent.getIntExtra("currentIndex", 0)
+        val isNetwork = intent.getBooleanExtra("isNetwork", false)
 
-        if (uriList.isEmpty()) {
-            Toast.makeText(this, "No videos found", Toast.LENGTH_SHORT).show()
-            finish()
-            return
+        if (isNetwork)
+        {
+            val videoList = intent.getSerializableExtra("networkVideos") as? ArrayList<Video>
+            val index = intent.getIntExtra("currentIndex",0)
+
+            if (videoList.isNullOrEmpty())
+            {
+                Toast.makeText(this, "No Videos found", Toast.LENGTH_SHORT).show()
+                finish()
+                return
+            }
+
+            val mediaItems = videoList.map { MediaItem.fromUri(Uri.parse(it.sources.first())) }
+            player.setMediaItems(mediaItems,index,0L)
+            binding.playerView.findViewById<TextView>(R.id.titlecard)?.text = videoList[index].title
+        }
+        else
+        {
+            val urlList = intent.getStringArrayListExtra("videoUris") ?: arrayListOf()
+            val currentIndex = intent.getIntExtra("currentIndex",0)
+
+            if (urlList.isEmpty()) {
+                Toast.makeText(this, "No videos found", Toast.LENGTH_SHORT).show()
+                finish()
+                return
+            }
+
+            val mediaItems = urlList.map { uri -> MediaItem.fromUri(Uri.parse(uri)) }
+            player.setMediaItems(mediaItems, currentIndex, 0L)
+            binding.playerView.findViewById<TextView>(R.id.titlecard)?.text = Uri.parse(urlList[currentIndex]).lastPathSegment ?: "Untitled"
         }
 
-        // Getting the title
-        val currentUri = Uri.parse(uriList[currentIndex])
-        binding.playerView.findViewById<TextView>(R.id.titlecard)?.text = currentUri.lastPathSegment ?: "Untitled"
-
-        // Setuping the player
-        player = ExoPlayer.Builder(this).build()
-        binding.playerView.player = player
-
-        val mediaItems = uriList.map { uri -> MediaItem.fromUri(Uri.parse(uri)) }
-        player.setMediaItems(mediaItems, currentIndex, 0L)
         player.prepare()
         player.play()
 
@@ -206,37 +233,77 @@ class MediaPlayerActivity : AppCompatActivity() {
             }
 
 
-            // Scroll Volume & Brightness Logic
+            // Scroll Volume & Video Seekbar Logic
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+                if (isZooming) return false
+
                 val deltaY = e2.y - (e1?.y ?: 0f)
                 val deltaX = e2.x - (e1?.x ?: 0f)
+                val absDeltaX = Math.abs(deltaX)
+                val absDeltaY = Math.abs(deltaY)
 
                 val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
 
-                // Vertical swipe = Volume
-                if (Math.abs(deltaY) > Math.abs(deltaX)) {
+                // Detect direction on first movement
+                if (gestureDirection == null) {
+                    gestureDirection = if (absDeltaY > absDeltaX) "vertical" else "horizontal"
+                }
+
+                if (gestureDirection == "vertical") {
+                    // Volume control
                     if (deltaY > 50) {
-                        // Swipe down = Volume down
                         audioManager.adjustVolume(AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
                     } else if (deltaY < -50) {
-                        // Swipe up = Volume up
                         audioManager.adjustVolume(AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
                     }
-                }
-                // Horizontal swipe = Brightness
-                else {
+                } else if (gestureDirection == "horizontal") {
+                    // Video seeking
                     if (deltaX > 50) {
-                        // Swipe right = Increase brightness
-                        changeScreenBrightness(0.05f)
+                        val seekTo = (player.currentPosition + 5000).coerceAtMost(player.duration)
+                        player.seekTo(seekTo)
+                        showGestureFeedback(">> +5s")
                     } else if (deltaX < -50) {
-                        // Swipe left = Decrease brightness
-                        changeScreenBrightness(-0.05f)
+                        val seekTo = (player.currentPosition - 5000).coerceAtLeast(0)
+                        player.seekTo(seekTo)
+                        showGestureFeedback("<< -5s")
                     }
                 }
                 return true
             }
         })
 
+        // Scale Gesture Detector
+        scaleGestureDetector = ScaleGestureDetector(this, object: ScaleGestureDetector.SimpleOnScaleGestureListener(){
+
+            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                isZooming = true
+                return true
+            }
+
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                scaleFactor *= detector.scaleFactor
+                scaleFactor = scaleFactor.coerceIn(1.0f,3.0f)
+
+                binding.playerView.apply {
+                    pivotX = detector.focusX
+                    pivotY = detector.focusY
+
+                    animate()
+                        .scaleX(scaleFactor)
+                        .scaleY(scaleFactor)
+                        .setDuration(200)
+                        .start()
+                }
+
+                return true
+            }
+
+            override fun onScaleEnd(detector: ScaleGestureDetector) {
+                isZooming = false
+            }
+        })
+
+        // Error toast for invalid url
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 Toast.makeText(applicationContext, "Error in Playing the Media", Toast.LENGTH_SHORT).show()
@@ -248,9 +315,23 @@ class MediaPlayerActivity : AppCompatActivity() {
         updateSeekBar()
 
         player.addListener(object : Player.Listener {
-            override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_ENDED && player.hasNextMediaItem()) {
-                    player.seekToNext()
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                super.onMediaItemTransition(mediaItem, reason)
+
+                // Check if the video is from network or local
+                if (isNetwork) {
+                    val videoList = intent.getSerializableExtra("networkVideos") as? ArrayList<Video>
+                    val currentIndex = player.currentMediaItemIndex
+                    if (videoList != null && currentIndex < videoList.size) {
+                        binding.playerView.findViewById<TextView>(R.id.titlecard)?.text = videoList[currentIndex].title
+                    }
+                } else {
+                    val uriList = intent.getStringArrayListExtra("videoUris") ?: arrayListOf()
+                    val currentIndex = player.currentMediaItemIndex
+                    if (currentIndex < uriList.size) {
+                        binding.playerView.findViewById<TextView>(R.id.titlecard)?.text =
+                            Uri.parse(uriList[currentIndex]).lastPathSegment ?: "Untitled"
+                    }
                 }
             }
         })
@@ -314,6 +395,12 @@ class MediaPlayerActivity : AppCompatActivity() {
         Settings.System.putInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, newBrightness)
     }
 
+    // Calling Toast for Left -> Right seekbar
+    private fun showGestureFeedback(message: String) {
+        val toast = Toast.makeText(this, message, Toast.LENGTH_SHORT)
+        toast.show()
+    }
+
     // Seekbar update function
     private fun updateSeekBar() {
         handler.postDelayed(object : Runnable {
@@ -374,8 +461,17 @@ class MediaPlayerActivity : AppCompatActivity() {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
-        if (ev != null) {
-            gestureDetector.onTouchEvent(ev)
+        ev?.let {
+
+            // Pass the event to both gesture detectors
+            scaleGestureDetector.onTouchEvent(it)   // pinch-zoom gestures
+            gestureDetector.onTouchEvent(it)        // video seekbar gestures
+
+            // Reset gesture lock on finger lift
+            if (it.action == MotionEvent.ACTION_UP || it.action == MotionEvent.ACTION_CANCEL)
+            {
+                gestureDirection = null
+            }
         }
         return super.dispatchTouchEvent(ev)
     }
