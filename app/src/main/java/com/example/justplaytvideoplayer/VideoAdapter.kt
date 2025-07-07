@@ -24,7 +24,6 @@ class VideoAdapter(
         holder.binding.videoTitle.text = video.title
 
         holder.binding.root.setOnClickListener {
-            val uriList = videos.mapNotNull { it.sources.firstOrNull() }
             val intent = Intent(context, MediaPlayerActivity::class.java)
             intent.putExtra("isNetwork", true)
             intent.putExtra("currentIndex", position)

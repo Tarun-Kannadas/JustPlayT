@@ -16,17 +16,22 @@ import android.view.ScaleGestureDetector
 import android.widget.*
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.OptIn
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.constraintlayout.widget.ConstraintSet.Motion
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.example.justplaytvideoplayer.databinding.ActivityMediaPlayerBinding
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 class MediaPlayerActivity : AppCompatActivity() {
@@ -44,6 +49,7 @@ class MediaPlayerActivity : AppCompatActivity() {
     private var scaleFactor = 1.0f
     private var gestureDirection: String? = null
     private var isZooming = false
+    private val SUBTITLE_PICKER_REQUEST_CODE = 1001
 
     @OptIn(UnstableApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,7 +64,10 @@ class MediaPlayerActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         // Setuping the player
-        player = ExoPlayer.Builder(this).build()
+        val trackSelector = DefaultTrackSelector(this)
+        player = ExoPlayer.Builder(this)
+            .setTrackSelector(trackSelector)
+            .build()
         binding.playerView.player = player
         binding.playerView.setControllerShowTimeoutMs(1000) // hides after 1 second
 
@@ -83,9 +92,40 @@ class MediaPlayerActivity : AppCompatActivity() {
                 return
             }
 
-            val mediaItems = videoList.map { MediaItem.fromUri(Uri.parse(it.sources.first())) }
-            player.setMediaItems(mediaItems,index,0L)
+            val mediaItems = videoList.map { video ->
+                val mediaItemBuilder = MediaItem.Builder()
+                    .setUri(Uri.parse(video.sources.first()))
+                    .setMediaId(video.title)
+
+                if (video.subtitle?.isNotEmpty() == true) {
+                    val subtitleConfigs = video.subtitle.mapNotNull { subtitleUrl ->
+                        val subtitleStr = subtitleUrl.toString() // force to String
+                        val uri = Uri.parse(subtitleStr)
+
+                        val mimeType = when {
+                            subtitleStr.endsWith(".vtt", ignoreCase = true) -> "text/vtt"
+                            subtitleStr.endsWith(".srt", ignoreCase = true) -> "application/x-subrip"
+                            else -> null
+                        }
+
+                        mimeType?.let {
+                            MediaItem.SubtitleConfiguration.Builder(uri)
+                                .setMimeType(it)
+                                .setLanguage("en")
+                                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                                .build()
+                        }
+                    }
+
+                    mediaItemBuilder.setSubtitleConfigurations(subtitleConfigs)
+                }
+
+                mediaItemBuilder.build()
+            }
+
+            player.setMediaItems(mediaItems, index, 0L)
             binding.playerView.findViewById<TextView>(R.id.titlecard)?.text = videoList[index].title
+            binding.playerView.setShowSubtitleButton(true)
         }
         else
         {
@@ -98,9 +138,48 @@ class MediaPlayerActivity : AppCompatActivity() {
                 return
             }
 
-            val mediaItems = urlList.map { uri -> MediaItem.fromUri(Uri.parse(uri)) }
+            val supportedSubtitleExts = listOf("srt", "vtt", "ass", "ssa", "sub", "txt")
+
+            val mediaItems = urlList.map { videoPath ->
+                val videoUri = Uri.parse(videoPath)
+                val videoFile = File(videoUri.path!!)
+                val videoDir = videoFile.parentFile
+                val baseName = videoFile.nameWithoutExtension
+
+                // Find any subtitle file with matching name in the same folder
+                val subtitleFile = supportedSubtitleExts
+                    .map { ext -> File(videoDir, "$baseName.$ext") }
+                    .firstOrNull { it.exists() }
+
+                val builder = MediaItem.Builder()
+                    .setUri(videoUri)
+                    .setMediaId(baseName)
+
+                subtitleFile?.let {
+                    val mimeType = when (it.extension.lowercase()) {
+                        "srt" -> "application/x-subrip"
+                        "vtt" -> "text/vtt"
+                        "ass", "ssa" -> "text/x-ssa"
+                        "sub", "txt" -> "application/x-subrip" // fallback
+                        else -> "application/x-subrip"
+                    }
+
+                    val subtitleUri = Uri.fromFile(it)
+                    val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(subtitleUri)
+                        .setMimeType(mimeType)
+                        .setLanguage("en")
+                        .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                        .build()
+
+                    builder.setSubtitleConfigurations(listOf(subtitleConfig))
+                }
+
+                builder.build()
+            }
+
             player.setMediaItems(mediaItems, currentIndex, 0L)
             binding.playerView.findViewById<TextView>(R.id.titlecard)?.text = Uri.parse(urlList[currentIndex]).lastPathSegment ?: "Untitled"
+            binding.playerView.setShowSubtitleButton(true)
         }
 
         player.prepare()
@@ -202,6 +281,7 @@ class MediaPlayerActivity : AppCompatActivity() {
                 return true
             }
 
+
             // Single Tap Logics for gestures
             @OptIn(UnstableApi::class)
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
@@ -231,7 +311,6 @@ class MediaPlayerActivity : AppCompatActivity() {
                 }
                 return true
             }
-
 
             // Scroll Volume & Video Seekbar Logic
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
@@ -303,18 +382,16 @@ class MediaPlayerActivity : AppCompatActivity() {
             }
         })
 
-        // Error toast for invalid url
-        player.addListener(object : Player.Listener {
-            override fun onPlayerError(error: PlaybackException) {
-                Toast.makeText(applicationContext, "Error in Playing the Media", Toast.LENGTH_SHORT).show()
-                super.onPlayerError(error)
-            }
-        })
-
         seekBar.max = 1000
         updateSeekBar()
 
         player.addListener(object : Player.Listener {
+
+            override fun onPlayerError(error: PlaybackException) {
+                Toast.makeText(applicationContext, "Error in Playing the Media", Toast.LENGTH_SHORT).show()
+                super.onPlayerError(error)
+            }
+
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 super.onMediaItemTransition(mediaItem, reason)
 
@@ -350,7 +427,11 @@ class MediaPlayerActivity : AppCompatActivity() {
                         true
                     }
                     R.id.action_subtitles -> {
-                        // TODO: Show subtitle options
+                        if (!isNetwork) {
+                            openSubtitleFilePicker() // local storage manual subtitle uploading
+                        } else {
+                            showSubtitleSelectionPopup() // subtitles for online library
+                        }
                         true
                     }
                     R.id.action_audio_tracks -> {
@@ -381,18 +462,106 @@ class MediaPlayerActivity : AppCompatActivity() {
         }
     }
 
-    // Brightness Adjustment function
-    private fun changeScreenBrightness(delta: Float)
-    {
-        if (!Settings.System.canWrite(this))
-        {
-            Toast.makeText(this, "Permission to change brightness denied", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val currentBrightness = Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, 125)
-        val newBrightness = (currentBrightness + (delta * 255)).toInt().coerceIn(10, 255)
+    //Handling the Result of subtitle file picker
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
 
-        Settings.System.putInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, newBrightness)
+        if (requestCode == SUBTITLE_PICKER_REQUEST_CODE && resultCode == RESULT_OK) {
+            data?.data?.let { subtitleUri ->
+                addSubtitleToPlayer(subtitleUri)
+            }
+        }
+    }
+
+    // for onActivityResult
+    private fun getSubtitleMimeType(fileName: String): String {
+        return when {
+            fileName.endsWith(".srt", true) -> "application/x-subrip"
+            fileName.endsWith(".vtt", true) -> "text/vtt"
+            else -> "text/plain"
+        }
+    }
+
+    // for onActivityResult
+    @OptIn(UnstableApi::class)
+    private fun addSubtitleToPlayer(subtitleUri: Uri) {
+        val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(subtitleUri)
+            .setMimeType(getSubtitleMimeType(subtitleUri.toString()))
+            .setLanguage("en")
+            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+            .build()
+
+        val currentMediaItem = player.currentMediaItem
+        if (currentMediaItem != null) {
+            val newMediaItem = currentMediaItem.buildUpon()
+                .setSubtitleConfigurations(listOf(subtitleConfig))
+                .build()
+
+            val currentPosition = player.currentPosition
+
+            player.setMediaItem(newMediaItem)
+            player.prepare()
+            player.seekTo(currentPosition)
+            player.play()
+        }
+    }
+
+    private fun openSubtitleFilePicker() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/x-subrip", "text/vtt", "text/plain"))
+        }
+        startActivityForResult(intent, SUBTITLE_PICKER_REQUEST_CODE)
+    }
+
+
+    // Subtitles function
+    @OptIn(UnstableApi::class)
+    private fun showSubtitleSelectionPopup() {
+        val trackSelector = player.trackSelector as? DefaultTrackSelector ?: return
+        val mappedTrackInfo = trackSelector.currentMappedTrackInfo ?: return
+
+        var foundSubtitles = false
+
+        for (rendererIndex in 0 until mappedTrackInfo.rendererCount) {
+            val trackGroups = mappedTrackInfo.getTrackGroups(rendererIndex)
+
+            if (player.getRendererType(rendererIndex) == C.TRACK_TYPE_TEXT && trackGroups.length > 0) {
+                val builder = AlertDialog.Builder(this)
+                builder.setTitle("Select Subtitle")
+
+                val subtitles = mutableListOf<String>()
+                val trackGroup = trackGroups[0]
+                for (i in 0 until trackGroup.length) {
+                    val format = trackGroup.getFormat(i)
+                    subtitles.add(format.label ?: "Subtitle ${i + 1}")
+                }
+                subtitles.add("Disable Subtitles")
+
+                builder.setItems(subtitles.toTypedArray()) { _, which ->
+                    val parametersBuilder = trackSelector.parameters.buildUpon()
+                    if (which < trackGroup.length) {
+                        parametersBuilder.setRendererDisabled(rendererIndex, false)
+                        parametersBuilder.setSelectionOverride(
+                            rendererIndex,
+                            trackGroups,
+                            DefaultTrackSelector.SelectionOverride(0, which)
+                        )
+                    } else {
+                        parametersBuilder.setRendererDisabled(rendererIndex, true)
+                    }
+                    trackSelector.parameters = parametersBuilder.build()
+                }
+                builder.show()
+                foundSubtitles = true
+                break
+            }
+        }
+
+        if (!foundSubtitles) {
+            Toast.makeText(this, "No subtitles available", Toast.LENGTH_SHORT).show()
+        }
     }
 
     // Calling Toast for Left -> Right seekbar
