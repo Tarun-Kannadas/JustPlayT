@@ -55,6 +55,7 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer.dash)
     implementation(libs.androidx.media3.ui.v171)
     implementation(libs.androidx.media3.ui.compose)
+    implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     // Optional - if you use SmoothStreaming
     implementation(libs.androidx.media3.exoplayer.smoothstreaming)
     implementation("androidx.cardview:cardview:1.0.0")

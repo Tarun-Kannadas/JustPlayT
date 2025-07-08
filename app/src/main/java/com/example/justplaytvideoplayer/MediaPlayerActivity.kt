@@ -13,6 +13,7 @@ import android.provider.Settings
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
+import android.view.View
 import android.widget.*
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.OptIn
@@ -24,6 +25,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
@@ -50,6 +52,11 @@ class MediaPlayerActivity : AppCompatActivity() {
     private var gestureDirection: String? = null
     private var isZooming = false
     private val SUBTITLE_PICKER_REQUEST_CODE = 1001
+    private var initialSeekPosition: Long = 0L
+    private var lastSeekUpdateTime = 0L
+    private var scrubbing = false
+
+    private lateinit var gestureTooltip: TextView
 
     @OptIn(UnstableApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,6 +69,10 @@ class MediaPlayerActivity : AppCompatActivity() {
 
         binding = ActivityMediaPlayerBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // Initialize tooltip
+        gestureTooltip = findViewById(R.id.gestureTooltip)
+        gestureTooltip.visibility = View.GONE
 
         // Setuping the player
         val trackSelector = DefaultTrackSelector(this)
@@ -83,28 +94,38 @@ class MediaPlayerActivity : AppCompatActivity() {
         if (isNetwork)
         {
             val videoList = intent.getSerializableExtra("networkVideos") as? ArrayList<Video>
-            val index = intent.getIntExtra("currentIndex",0)
+            val index = intent.getIntExtra("currentIndex", 0)
 
-            if (videoList.isNullOrEmpty())
-            {
+            if (videoList.isNullOrEmpty()) {
                 Toast.makeText(this, "No Videos found", Toast.LENGTH_SHORT).show()
                 finish()
                 return
             }
 
             val mediaItems = videoList.map { video ->
+                val sourceUrl = video.sources.firstOrNull()
+
+                if (sourceUrl.isNullOrBlank()) {
+                    Toast.makeText(this, "Invalid video source for: ${video.title}", Toast.LENGTH_SHORT).show()
+                    return@map null
+                }
+
                 val mediaItemBuilder = MediaItem.Builder()
-                    .setUri(Uri.parse(video.sources.first()))
+                    .setUri(Uri.parse(sourceUrl))
                     .setMediaId(video.title)
 
-                if (video.subtitle?.isNotEmpty() == true) {
-                    val subtitleConfigs = video.subtitle.mapNotNull { subtitleUrl ->
-                        val subtitleStr = subtitleUrl.toString() // force to String
-                        val uri = Uri.parse(subtitleStr)
+                // Explicit MIME type for HLS
+                if (sourceUrl.endsWith(".m3u8", ignoreCase = true)) {
+                    mediaItemBuilder.setMimeType(MimeTypes.APPLICATION_M3U8)
+                }
 
+                // Subtitles
+                if (!video.subtitle.isNullOrEmpty()) {
+                    val subtitleConfigs = video.subtitle.mapNotNull { subtitleUrl ->
+                        val uri = Uri.parse(subtitleUrl)
                         val mimeType = when {
-                            subtitleStr.endsWith(".vtt", ignoreCase = true) -> "text/vtt"
-                            subtitleStr.endsWith(".srt", ignoreCase = true) -> "application/x-subrip"
+                            subtitleUrl.endsWith(".vtt", ignoreCase = true) -> "text/vtt"
+                            subtitleUrl.endsWith(".srt", ignoreCase = true) -> "application/x-subrip"
                             else -> null
                         }
 
@@ -116,11 +137,16 @@ class MediaPlayerActivity : AppCompatActivity() {
                                 .build()
                         }
                     }
-
                     mediaItemBuilder.setSubtitleConfigurations(subtitleConfigs)
                 }
 
                 mediaItemBuilder.build()
+            }.filterNotNull() // Remove any nulls from invalid sources
+
+            if (mediaItems.isEmpty()) {
+                Toast.makeText(this, "No valid media items found", Toast.LENGTH_SHORT).show()
+                finish()
+                return
             }
 
             player.setMediaItems(mediaItems, index, 0L)
@@ -318,33 +344,53 @@ class MediaPlayerActivity : AppCompatActivity() {
 
                 val deltaY = e2.y - (e1?.y ?: 0f)
                 val deltaX = e2.x - (e1?.x ?: 0f)
-                val absDeltaX = Math.abs(deltaX)
-                val absDeltaY = Math.abs(deltaY)
+                val absDeltaX = kotlin.math.abs(deltaX)
+                val absDeltaY = kotlin.math.abs(deltaY)
 
                 val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
 
-                // Detect direction on first movement
+                // Detect direction (horizontal for seek, vertical for volume)
                 if (gestureDirection == null) {
                     gestureDirection = if (absDeltaY > absDeltaX) "vertical" else "horizontal"
+                    if (gestureDirection == "horizontal") {
+                        initialSeekPosition = player.currentPosition
+                        scrubbing = true
+                    }
                 }
 
                 if (gestureDirection == "vertical") {
-                    // Volume control
+                    // Volume Control
                     if (deltaY > 50) {
                         audioManager.adjustVolume(AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
                     } else if (deltaY < -50) {
                         audioManager.adjustVolume(AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
                     }
                 } else if (gestureDirection == "horizontal") {
-                    // Video seeking
-                    if (deltaX > 50) {
-                        val seekTo = (player.currentPosition + 5000).coerceAtMost(player.duration)
-                        player.seekTo(seekTo)
-                        showGestureFeedback(">> +5s")
-                    } else if (deltaX < -50) {
-                        val seekTo = (player.currentPosition - 5000).coerceAtLeast(0)
-                        player.seekTo(seekTo)
-                        showGestureFeedback("<< -5s")
+                    // Seek Logic
+                    val screenWidth = binding.root.width
+                    val percentMoved = deltaX / screenWidth
+                    val seekOffset = (percentMoved * player.duration).toLong()
+                    val newSeekPosition = (initialSeekPosition + seekOffset).coerceIn(0, player.duration)
+
+                    // Show tooltip
+                    val delta = newSeekPosition - initialSeekPosition
+                    val sign = if (delta >= 0) "+" else "-"
+                    val timeDiff = formatTime(kotlin.math.abs(delta))
+
+                    // Set and show tooltip
+                    gestureTooltip.text = "$sign$timeDiff"
+                    gestureTooltip.visibility = View.VISIBLE
+
+                    // Auto-hide after 1 second
+                    gestureTooltip.removeCallbacks(hideTooltipRunnable)
+                    gestureTooltip.postDelayed(hideTooltipRunnable, 1000)
+
+                    // Throttle seek updates
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastSeekUpdateTime > 100) {
+                        player.seekTo(newSeekPosition)
+                        updateSeekBarVisuals(newSeekPosition)
+                        lastSeekUpdateTime = currentTime
                     }
                 }
                 return true
@@ -435,13 +481,12 @@ class MediaPlayerActivity : AppCompatActivity() {
                         true
                     }
                     R.id.action_audio_tracks -> {
-                        // TODO: Show audio track options
+                        showAudioTrackSelectionPopup()
                         true
                     }
                     R.id.action_playlist -> {
                         player.pause()
                         player.release()
-                        // Finish the activity and return
                         finish()
                         true
                     }
@@ -473,6 +518,52 @@ class MediaPlayerActivity : AppCompatActivity() {
         }
     }
 
+    //Audio track selection
+    @OptIn(UnstableApi::class)
+    private fun showAudioTrackSelectionPopup() {
+        val trackSelector = player.trackSelector as? DefaultTrackSelector ?: return
+        val mappedTrackInfo = trackSelector.currentMappedTrackInfo ?: return
+
+        var foundAudioTracks = false
+
+        for (rendererIndex in 0 until mappedTrackInfo.rendererCount) {
+            if (player.getRendererType(rendererIndex) == C.TRACK_TYPE_AUDIO) {
+                val trackGroups = mappedTrackInfo.getTrackGroups(rendererIndex)
+
+                if (trackGroups.length > 0) {
+                    val builder = AlertDialog.Builder(this)
+                    builder.setTitle("Select Audio Track")
+
+                    val audioTracks = mutableListOf<String>()
+                    val trackGroup = trackGroups[0]
+                    for (i in 0 until trackGroup.length) {
+                        val format = trackGroup.getFormat(i)
+                        audioTracks.add(format.language ?: "Track ${i + 1}")
+                    }
+
+                    builder.setItems(audioTracks.toTypedArray()) { _, which ->
+                        val parametersBuilder = trackSelector.parameters.buildUpon()
+                        parametersBuilder.setRendererDisabled(rendererIndex, false)
+                        parametersBuilder.setSelectionOverride(
+                            rendererIndex,
+                            trackGroups,
+                            DefaultTrackSelector.SelectionOverride(0, which)
+                        )
+                        trackSelector.parameters = parametersBuilder.build()
+                    }
+                    builder.show()
+                    foundAudioTracks = true
+                    break
+                }
+            }
+        }
+
+        if (!foundAudioTracks) {
+            Toast.makeText(this, "No audio tracks available", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+
     // for onActivityResult
     private fun getSubtitleMimeType(fileName: String): String {
         return when {
@@ -480,6 +571,21 @@ class MediaPlayerActivity : AppCompatActivity() {
             fileName.endsWith(".vtt", true) -> "text/vtt"
             else -> "text/plain"
         }
+    }
+
+    // update seekbar + time
+    private fun updateSeekBarVisuals(position: Long) {
+        val duration = player.duration
+        if (duration > 0) {
+            val progress = ((position.toDouble() / duration) * 1000).toInt()
+            seekBar.progress = progress
+            currentTimeText.text = formatTime(position)
+        }
+    }
+
+    // Toottip Hide Runnable
+    private val hideTooltipRunnable = Runnable {
+        gestureTooltip.visibility = View.GONE
     }
 
     // for onActivityResult
@@ -531,22 +637,37 @@ class MediaPlayerActivity : AppCompatActivity() {
                 val builder = AlertDialog.Builder(this)
                 builder.setTitle("Select Subtitle")
 
+                val overrides = mutableListOf<Pair<Int, Int>>()
                 val subtitles = mutableListOf<String>()
                 val trackGroup = trackGroups[0]
-                for (i in 0 until trackGroup.length) {
-                    val format = trackGroup.getFormat(i)
-                    subtitles.add(format.label ?: "Subtitle ${i + 1}")
+                for (groupIndex in 0 until trackGroups.length) {
+                    val group = trackGroups[groupIndex]
+                    for (trackIndex in 0 until group.length) {
+                        val format = group.getFormat(trackIndex)
+                        val rawLabel = format.label ?: format.language ?: "Subtitle ${subtitles.size + 1}"
+                        val label = when {
+                            format.label != null -> format.label
+                            format.language.equals("und", true) -> "Default"
+                            format.language != null -> format.language!!.uppercase()
+                            else -> "Subtitle ${subtitles.size + 1}"
+                        }
+                        if (label != null) {
+                            subtitles.add(label)
+                        }
+                        overrides.add(groupIndex to trackIndex)
+                    }
                 }
                 subtitles.add("Disable Subtitles")
 
                 builder.setItems(subtitles.toTypedArray()) { _, which ->
                     val parametersBuilder = trackSelector.parameters.buildUpon()
-                    if (which < trackGroup.length) {
+                    if (which < overrides.size) {
+                        val (groupIndex, trackIndex) = overrides[which]
                         parametersBuilder.setRendererDisabled(rendererIndex, false)
                         parametersBuilder.setSelectionOverride(
                             rendererIndex,
                             trackGroups,
-                            DefaultTrackSelector.SelectionOverride(0, which)
+                            DefaultTrackSelector.SelectionOverride(groupIndex, trackIndex)
                         )
                     } else {
                         parametersBuilder.setRendererDisabled(rendererIndex, true)
@@ -562,12 +683,6 @@ class MediaPlayerActivity : AppCompatActivity() {
         if (!foundSubtitles) {
             Toast.makeText(this, "No subtitles available", Toast.LENGTH_SHORT).show()
         }
-    }
-
-    // Calling Toast for Left -> Right seekbar
-    private fun showGestureFeedback(message: String) {
-        val toast = Toast.makeText(this, message, Toast.LENGTH_SHORT)
-        toast.show()
     }
 
     // Seekbar update function
@@ -637,9 +752,10 @@ class MediaPlayerActivity : AppCompatActivity() {
             gestureDetector.onTouchEvent(it)        // video seekbar gestures
 
             // Reset gesture lock on finger lift
-            if (it.action == MotionEvent.ACTION_UP || it.action == MotionEvent.ACTION_CANCEL)
-            {
+            if (it.action == MotionEvent.ACTION_UP || it.action == MotionEvent.ACTION_CANCEL) {
                 gestureDirection = null
+                scrubbing = false
+                gestureTooltip.visibility = View.GONE
             }
         }
         return super.dispatchTouchEvent(ev)
