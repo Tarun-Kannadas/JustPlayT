@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.provider.Settings
 import android.view.GestureDetector
+import android.view.Menu
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
@@ -21,6 +22,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.constraintlayout.widget.ConstraintSet.Motion
+import androidx.core.view.MenuItemCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.C
@@ -32,9 +34,16 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.mediarouter.app.MediaRouteActionProvider
+import androidx.mediarouter.app.MediaRouteButton
+import androidx.mediarouter.app.MediaRouteDialogFactory
 import com.example.justplaytvideoplayer.databinding.ActivityMediaPlayerBinding
+import com.google.android.gms.cast.framework.CastButtonFactory
 import java.io.File
 import java.util.concurrent.TimeUnit
+//import com.google.android.gms.cast.framework.media.widget.CastControlButtonsProvider
+import com.google.android.gms.cast.framework.CastContext
+import kotlin.math.abs
 
 class MediaPlayerActivity : AppCompatActivity() {
 
@@ -68,7 +77,14 @@ class MediaPlayerActivity : AppCompatActivity() {
         window.attributes = layoutParams
 
         binding = ActivityMediaPlayerBinding.inflate(layoutInflater)
+        CastContext.getSharedInstance(this)
         setContentView(binding.root)
+
+        val castButton: MediaRouteButton = findViewById(R.id.btn_cast)
+        val castContext = CastContext.getSharedInstance(this)
+
+        castButton.routeSelector = castContext.mergedSelector!!
+        castButton.setDialogFactory(MediaRouteDialogFactory.getDefault())
 
         // Initialize tooltip
         gestureTooltip = findViewById(R.id.gestureTooltip)
@@ -344,8 +360,8 @@ class MediaPlayerActivity : AppCompatActivity() {
 
                 val deltaY = e2.y - (e1?.y ?: 0f)
                 val deltaX = e2.x - (e1?.x ?: 0f)
-                val absDeltaX = kotlin.math.abs(deltaX)
-                val absDeltaY = kotlin.math.abs(deltaY)
+                val absDeltaX = abs(deltaX)
+                val absDeltaY = abs(deltaY)
 
                 val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
 
@@ -375,7 +391,7 @@ class MediaPlayerActivity : AppCompatActivity() {
                     // Show tooltip
                     val delta = newSeekPosition - initialSeekPosition
                     val sign = if (delta >= 0) "+" else "-"
-                    val timeDiff = formatTime(kotlin.math.abs(delta))
+                    val timeDiff = formatTime(abs(delta))
 
                     // Set and show tooltip
                     gestureTooltip.text = "$sign$timeDiff"
@@ -490,10 +506,6 @@ class MediaPlayerActivity : AppCompatActivity() {
                         finish()
                         true
                     }
-                    R.id.action_cast -> {
-                        // TODO: Start cast
-                        true
-                    }
                     else -> false
                 }
             }
@@ -564,7 +576,7 @@ class MediaPlayerActivity : AppCompatActivity() {
     }
 
 
-    // for onActivityResult
+    // File name for manual uploading subtitle
     private fun getSubtitleMimeType(fileName: String): String {
         return when {
             fileName.endsWith(".srt", true) -> "application/x-subrip"
@@ -576,19 +588,28 @@ class MediaPlayerActivity : AppCompatActivity() {
     // update seekbar + time
     private fun updateSeekBarVisuals(position: Long) {
         val duration = player.duration
-        if (duration > 0) {
-            val progress = ((position.toDouble() / duration) * 1000).toInt()
+
+        // Check if duration is valid and positive
+        if (duration != C.TIME_UNSET && duration > 0) {
+            // Clamp position within valid range
+            val safePosition = position.coerceIn(0, duration)
+
+            val progress = ((safePosition.toDouble() / duration) * 1000).toInt()
             seekBar.progress = progress
-            currentTimeText.text = formatTime(position)
+            currentTimeText.text = formatTime(safePosition)
+        } else {
+            // Optional: Handle case when duration is unknown
+            seekBar.progress = 0
+            currentTimeText.text = formatTime(0L)
         }
     }
 
-    // Toottip Hide Runnable
+    // Tooltip Hide Runnable
     private val hideTooltipRunnable = Runnable {
         gestureTooltip.visibility = View.GONE
     }
 
-    // for onActivityResult
+    // Manual uploading of subtitle handler
     @OptIn(UnstableApi::class)
     private fun addSubtitleToPlayer(subtitleUri: Uri) {
         val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(subtitleUri)
@@ -639,7 +660,6 @@ class MediaPlayerActivity : AppCompatActivity() {
 
                 val overrides = mutableListOf<Pair<Int, Int>>()
                 val subtitles = mutableListOf<String>()
-                val trackGroup = trackGroups[0]
                 for (groupIndex in 0 until trackGroups.length) {
                     val group = trackGroups[groupIndex]
                     for (trackIndex in 0 until group.length) {

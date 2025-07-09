@@ -11,7 +11,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="top"
         android:orientation="horizontal"
-        android:gravity="center"
+        android:gravity="center_vertical"
         android:padding="12dp"
         android:layout_marginTop="12dp"
         android:background="#AA000000">
@@ -22,28 +22,38 @@
             android:layout_height="40dp"
             android:background="@android:color/transparent"
             android:src="@drawable/ic_back"
-            android:contentDescription="Previous"
+            android:contentDescription="Back"
             android:scaleType="centerInside" />
 
         <TextView
             android:id="@+id/titlecard"
-            android:layout_width="250dp"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:textSize="20dp"
+            android:layout_weight="1"
+            android:textSize="20sp"
             android:text="JustPlayT"
             android:textColor="@color/white"
-            android:textAlignment="center"/>
+            android:textAlignment="center"
+            android:gravity="center" />
+
+        <androidx.mediarouter.app.MediaRouteButton
+            android:id="@+id/btn_cast"
+            android:layout_width="35dp"
+            android:layout_height="35dp"
+            android:layout_margin="8dp"
+            android:contentDescription="Cast"
+            android:background="@drawable/rounded_cast_icon"
+            android:padding="10dp"
+            android:tint="@android:color/white" />
 
         <ImageButton
             android:id="@+id/btn_menu"
             android:layout_width="40dp"
             android:layout_height="40dp"
-            android:layout_marginStart="8dp"
             android:background="@android:color/transparent"
             android:src="@drawable/ic_more_vert"
             android:contentDescription="More options"
             android:scaleType="centerInside" />
-
     </LinearLayout>
 
     <!-- Gesture Tooltip (Floating Center Text) -->

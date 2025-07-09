@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Circular background -->
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#FFFFFF" /> <!-- background color -->
+        </shape>
+    </item>
+
+    <!-- Your cast icon -->
+    <item android:drawable="@drawable/ic_cast" android:gravity="center" />
+</layer-list>

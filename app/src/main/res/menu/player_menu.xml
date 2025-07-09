@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<menu xmlns:android="http://schemas.android.com/apk/res/android">
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
     <item android:id="@+id/action_dark_mode"
         android:title="Toggle Dark Mode" />
     <item android:id="@+id/action_subtitles"
@@ -8,6 +9,4 @@
         android:title="Select Audio Track" />
     <item android:id="@+id/action_playlist"
         android:title="Playlist" />
-    <item android:id="@+id/action_cast"
-        android:title="Cast to Device" />
 </menu>
